@@ -1,6 +1,6 @@
 # Socks5
 
-A little Socks5 Server by ThreadServer
+A little Socks5 Server by ThreadServer. An asynchronous version in the AIO branch.
 
 ## How to use
 

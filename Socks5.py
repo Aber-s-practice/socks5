@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 import traceback
+import random
 
 logger = logging.getLogger("Socks5")
 
@@ -50,16 +51,10 @@ class BaseSessoin:
     Subclass must set handler
     """
 
-    SessionSet = dict()
-
     def __init__(self, sock: socket.socket, address: tuple):
         self.socket = sock
         self.address = address
         self.auth = BaseAuthentication(self)
-        self.SessionSet[self.socket] = {"address": self.address}
-
-    def __del__(self):
-        self.SessionSet.pop(self.socket)
 
     def recv(self, num: int) -> bytes:
         data = self.socket.recv(num)
@@ -117,13 +112,10 @@ class BaseSessoin:
         DST_PORT = int.from_bytes(self.recv(2), 'big')
         logger.info("Client reuqest %s:%s" % (DST_ADDR, DST_PORT))
         if CMD == 1:
-            self.SessionSet[self.socket].update({"method": "connect"})
             self.socks5_connect(ATYP, DST_ADDR, DST_PORT)
         elif CMD == 2:
-            self.SessionSet[self.socket].update({"method": "bind"})
             self.socks5_bind(ATYP, DST_ADDR, DST_PORT)
         elif CMD == 3:
-            self.SessionSet[self.socket].update({"method": "udp_associate"})
             self.socks5_udp_associate(ATYP, DST_ADDR, DST_PORT)
         else:
             self.reply(COMMAND_NOT_SUPPORTED)
@@ -226,7 +218,10 @@ class DefaultSession(BaseSessoin):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.auth = NoAuthentication(self)
-        self.sel = selectors.DefaultSelector()
+        # TCP Connect
+        self.sel = None
+        # UDP
+        self.alive = None
 
     def _forward(self, sender: socket.socket, receiver: socket.socket):
         data = sender.recv(4096)
@@ -263,6 +258,7 @@ class DefaultSession(BaseSessoin):
             logger.warning("Connection refused from %s:%s" % (address, port))
             return
         try:
+            self.sel = selectors.DefaultSelector()
             self._connect(self.socket, remote)
         except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
             return
@@ -279,31 +275,31 @@ class DefaultSession(BaseSessoin):
     def parse_udp_header(self, data: bytes) -> ((str, int), bytes):
         _data = bytearray(data)
 
-        def get(num: int) -> bytes:
+        def recv(num: int) -> bytes:
             if num == -1:
                 return bytes(_data)
             r = _data[:num]
             del _data[:num]
             return bytes(r)
-        RSV = get(2)
-        FRAG = get(1)
+        RSV = recv(2)
+        FRAG = recv(1)
         if int.from_bytes(FRAG, 'big') != 0:
             return None
-        ATYP = int.from_bytes(get(1), 'big')
+        ATYP = int.from_bytes(recv(1), 'big')
         # Parse target address
         if ATYP == 1:  # IPV4
-            ipv4 = get(4)
+            ipv4 = recv(4)
             DST_ADDR = socket.inet_ntoa(ipv4)
         elif ATYP == 3:  # Domain
-            addr_len = int.from_bytes(get(1), 'big')
-            DST_ADDR = get(addr_len).decode()
+            addr_len = int.from_bytes(recv(1), 'big')
+            DST_ADDR = recv(addr_len).decode()
         elif ATYP == 4:  # IPV6
-            ipv6 = get(16)
+            ipv6 = recv(16)
             DST_ADDR = socket.inet_ntop(socket.AF_INET6, ipv6)
         else:
             return None
-        DST_PORT = int.from_bytes(get(2), 'big')
-        return ((DST_ADDR, DST_PORT), get(-1))
+        DST_PORT = int.from_bytes(recv(2), 'big')
+        return ((DST_ADDR, DST_PORT), recv(-1))
 
     def add_udp_header(self, data: bytes, address: (str, int)) -> bytes:
         RSV, FRAG = b'\x00\x00', b'\x00'
@@ -325,31 +321,29 @@ class DefaultSession(BaseSessoin):
     def socks5_udp_associate(self, ATYP: int, address: str, port: int):
         udp_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        udp_server.bind(('0.0.0.0', self.socket.getsockname()[1]))
-        self.reply(SUCCEEDED, IP=self.socket.getsockname()[0], port=self.socket.getsockname()[1])
-        config = self.SessionSet[self.socket]
-        config["source"] = (address, port)
+        for _ in range(3):
+            try:
+                udp_port = random.randint(1024, 65535)
+                udp_server.bind(("0.0.0.0", udp_port))
+                break
+            except OSError:
+                continue
+        self.reply(SUCCEEDED, IP=self.socket.getsockname()[0], port=udp_port)
         threading.Thread(target=self._heartbeat, daemon=True).start()
         while self.alive:
             try:
                 msg, addr = udp_server.recvfrom(8192)
                 logger.debug(">>> %s" % msg)
-                if config["source"][0] == "0.0.0.0":
-                    config["source"] = addr
-
-                if config["source"] == addr:
-                    temp = self.parse_udp_header(msg)
-                    if temp is None:
+                if address == "0.0.0.0":
+                    address = addr
+                if address == addr:
+                    try:
+                        target, data = self.parse_udp_header(msg)
+                    except TypeError:
                         continue
-                    if config.get("target") is None:
-                        config["target"] = set((temp[0],))
-                    else:
-                        config["target"].add(temp[0])
-                    udp_server.sendto(temp[1], temp[0])
-                elif addr in config["target"]:
-                    udp_server.sendto(self.add_udp_header(msg, addr), config["source"])
-                else:  # Nothing to do.
-                    continue
+                    udp_server.sendto(data, target)
+                else:
+                    udp_server.sendto(self.add_udp_header(msg, addr), address)
             except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
                 continue
 
@@ -404,7 +398,7 @@ class Socks5:
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
-        format='[%(asctime)s] [%(levelname) -8s] %(message)s',
+        format='[%(asctime)s] [%(levelname)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
     )
     logger.setLevel(logging.DEBUG)
