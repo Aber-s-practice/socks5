@@ -328,6 +328,8 @@ class DefaultSession(BaseSessoin):
                 break
             except OSError:
                 continue
+        else:
+            self.reply(GENERAL_SOCKS_SERVER_FAILURE)
         self.reply(SUCCEEDED, IP=self.socket.getsockname()[0], port=udp_port)
         threading.Thread(target=self._heartbeat, daemon=True).start()
         while self.alive:
