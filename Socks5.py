@@ -219,7 +219,7 @@ class DefaultSession(BaseSessoin):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.auth = PasswordAuthentication(self)
+        self.auth = NoAuthentication(self)
         # TCP Connect
         self.sel = None
         # UDP
