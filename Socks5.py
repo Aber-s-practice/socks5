@@ -32,7 +32,7 @@ COMMAND_NOT_SUPPORTED = 7
 ADDRESS_TYPE_NOT_SUPPORTED = 8
 
 
-def judge(ip: str) -> int:
+def judge(ip):
     try:
         socket.inet_aton(ip)
         return 4
@@ -51,19 +51,19 @@ class BaseSessoin:
     Subclass must set handler
     """
 
-    def __init__(self, sock: socket.socket, address: tuple):
+    def __init__(self, sock, address):
         self.socket = sock
         self.address = address
         self.auth = BaseAuthentication(self)
 
-    def recv(self, num: int) -> bytes:
+    def recv(self, num):
         data = self.socket.recv(num)
         logger.debug("<<< %s" % data)
         if data == EMPTY:
             raise ConnectionError("Recv a empty bytes that may FIN or RST")
         return data
 
-    def send(self, data: bytes) -> int:
+    def send(self, data):
         self.socket.sendall(data)
         logger.debug(">>> %s" % data)
         return len(data)
@@ -76,6 +76,9 @@ class BaseSessoin:
             self.socket.close()
         except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError) as e:
             logger.error(e)
+            self.socket.close()
+        finally:
+            del self.auth
 
     def negotiate(self):
         data = self.recv(2)
@@ -90,7 +93,6 @@ class BaseSessoin:
         if METHOD == 255:
             raise Socks5Error("No methods available")
         self.auth.authenticate()
-        del self.auth
         data = self.recv(4)
         VER, CMD, RSV, ATYP = data
         if VER != 5:
@@ -121,7 +123,7 @@ class BaseSessoin:
             self.reply(COMMAND_NOT_SUPPORTED)
             raise Socks5Error("Unsupported CMD value: %s" % CMD)
 
-    def reply(self, REP: int, ATYP: int = 1, IP: str = "127.0.0.1", port: int = 1080):
+    def reply(self, REP, ATYP=1, IP="127.0.0.1", port=1080):
         VER, RSV = b'\x05', b'\x00'
         if ATYP == 1:
             BND_ADDR = socket.inet_aton(IP)
@@ -137,17 +139,17 @@ class BaseSessoin:
         reply = VER + REP + RSV + ATYP + BND_ADDR + BND_PORT
         self.send(reply)
 
-    def socks5_connect(self, ATYP: int, address: str, port: int):
+    def socks5_connect(self, ATYP, address, port):
         """ must be overwrited """
         self.reply(GENERAL_SOCKS_SERVER_FAILURE)
         self.socket.close()
 
-    def socks5_bind(self, ATYP: int, address: str, port: int):
+    def socks5_bind(self, ATYP, address, port):
         """ must be overwrited """
         self.reply(GENERAL_SOCKS_SERVER_FAILURE)
         self.socket.close()
 
-    def socks5_udp_associate(self, ATYP: int, address: str, port: int):
+    def socks5_udp_associate(self, ATYP, address, port):
         """ must be overwrited """
         self.reply(GENERAL_SOCKS_SERVER_FAILURE)
         self.socket.close()
@@ -158,7 +160,7 @@ class BaseAuthentication:
     def __init__(self, session):
         self.session = session
 
-    def getMethod(self, methods: set) -> int:
+    def getMethod(self, methods):
         """
         Return a allowed authentication method or 255
         Must be overwrited.
@@ -176,7 +178,7 @@ class BaseAuthentication:
 class NoAuthentication(BaseAuthentication):
     """ NO AUTHENTICATION REQUIRED """
 
-    def getMethod(self, methods: set) -> int:
+    def getMethod(self, methods):
         if 0 in methods:
             return 0
         return 255
@@ -188,27 +190,27 @@ class NoAuthentication(BaseAuthentication):
 class PasswordAuthentication(BaseAuthentication):
     """ USERNAME/PASSWORD """
 
-    def _getUser(self) -> dict:
-        return {"AberSheeran": "password123"}
+    def _getUser(self):
+        return {"abersheeran": "password123"}
 
-    def getMethod(self, methods: set) -> int:
+    def getMethod(self, methods):
         if 2 in methods:
             return 2
         return 255
 
     def authenticate(self):
         VER = self.session.recv(1)
-        if VER != 5:
-            self.session.send(b"\x05\x01")
+        if VER != b'\x01':
+            self.session.send(b"\x01\x01")
             raise Socks5Error("Unsupported version!")
         ULEN = int.from_bytes(self.session.recv(1), 'big')
         UNAME = self.session.recv(ULEN).decode("ASCII")
         PLEN = int.from_bytes(self.session.recv(1), 'big')
         PASSWD = self.session.recv(PLEN).decode("ASCII")
         if self._getUser().get(UNAME) and self._getUser().get(UNAME) == PASSWD:
-            self.session.send(b"\x05\x00")
+            self.session.send(b"\x01\x00")
         else:
-            self.session.send(b"\x05\x01")
+            self.session.send(b"\x01\x01")
             raise AuthenticationError("USERNAME or PASSWORD ERROR")
 
 
@@ -217,13 +219,13 @@ class DefaultSession(BaseSessoin):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.auth = NoAuthentication(self)
+        self.auth = PasswordAuthentication(self)
         # TCP Connect
         self.sel = None
         # UDP
-        self.alive = None
+        self.udp_server = None
 
-    def _forward(self, sender: socket.socket, receiver: socket.socket):
+    def _forward(self, sender, receiver):
         data = sender.recv(4096)
         if data == EMPTY:
             self._disconnect(sender, receiver)
@@ -231,7 +233,7 @@ class DefaultSession(BaseSessoin):
         receiver.sendall(data)
         logger.debug(f">=< {data}")
 
-    def _connect(self, local: socket.socket, remote: socket.socket):
+    def _connect(self, local, remote):
         self.sel.register(local, selectors.EVENT_READ, self._forward)
         self.sel.register(remote, selectors.EVENT_READ, self._forward)
         while True:
@@ -243,13 +245,13 @@ class DefaultSession(BaseSessoin):
                 elif key.fileobj == remote:
                     callback(key.fileobj, local)
 
-    def _disconnect(self, local: socket.socket, remote: socket.socket):
+    def _disconnect(self, local, remote):
         self.sel.unregister(local)
         self.sel.unregister(remote)
         local.close()
         remote.close()
 
-    def socks5_connect(self, ATYP: int, address: str, port: int):
+    def socks5_connect(self, ATYP, address, port):
         try:
             remote = socket.create_connection((address, port), timeout=5)
             self.reply(SUCCEEDED)
@@ -263,19 +265,28 @@ class DefaultSession(BaseSessoin):
         except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
             return
 
-    def _heartbeat(self):
-        try:
-            self.alive = True
-            while True:
-                self.send(b"heartbeat")
-                time.sleep(5)
-        except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
-            self.alive = False
+    def udp_run_forever(self, address, port):
+        while True:
+            try:
+                msg, addr = self.udp_server.recvfrom(8192)
+                logger.debug(">>> %s" % msg)
+                if address == "0.0.0.0":
+                    address = addr
+                if address == addr:
+                    try:
+                        target, data = self.parse_udp_header(msg)
+                    except TypeError:
+                        continue
+                    self.udp_server.sendto(data, target)
+                else:
+                    self.udp_server.sendto(self.add_udp_header(msg, addr), (address, port))
+            except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
+                continue
 
-    def parse_udp_header(self, data: bytes) -> ((str, int), bytes):
+    def parse_udp_header(self, data):
         _data = bytearray(data)
 
-        def recv(num: int) -> bytes:
+        def recv(num):
             if num == -1:
                 return bytes(_data)
             r = _data[:num]
@@ -301,7 +312,7 @@ class DefaultSession(BaseSessoin):
         DST_PORT = int.from_bytes(recv(2), 'big')
         return ((DST_ADDR, DST_PORT), recv(-1))
 
-    def add_udp_header(self, data: bytes, address: (str, int)) -> bytes:
+    def add_udp_header(self, data, address):
         RSV, FRAG = b'\x00\x00', b'\x00'
         t = judge(address[0])
         if t == 4:
@@ -311,43 +322,34 @@ class DefaultSession(BaseSessoin):
             ATYP = 4
             DST_ADDR = socket.inet_pton(socket.AF_INET6, address[0])
         else:
-            DST_ADDR = int(address[0]).to_bytes(2, 'big') + address[0].encode("UTF-8")
+            DST_ADDR = len(address[0]).to_bytes(2, 'big') + address[0].encode("UTF-8")
             ATYP = 3
         ATYP = ATYP.to_bytes(1, 'big')
         DST_PORT = address[1].to_bytes(2, 'big')
         reply = RSV + FRAG + ATYP + DST_ADDR + DST_PORT + data
         return reply
 
-    def socks5_udp_associate(self, ATYP: int, address: str, port: int):
-        udp_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        udp_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    def socks5_udp_associate(self, ATYP, address, port):
+        self.udp_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.udp_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         for _ in range(3):
             try:
                 udp_port = random.randint(1024, 65535)
-                udp_server.bind(("0.0.0.0", udp_port))
+                self.udp_server.bind(("0.0.0.0", udp_port))
                 break
             except OSError:
                 continue
         else:
             self.reply(GENERAL_SOCKS_SERVER_FAILURE)
+            return
         self.reply(SUCCEEDED, IP=self.socket.getsockname()[0], port=udp_port)
-        threading.Thread(target=self._heartbeat, daemon=True).start()
-        while self.alive:
-            try:
-                msg, addr = udp_server.recvfrom(8192)
-                logger.debug(">>> %s" % msg)
-                if address == "0.0.0.0":
-                    address = addr
-                if address == addr:
-                    try:
-                        target, data = self.parse_udp_header(msg)
-                    except TypeError:
-                        continue
-                    udp_server.sendto(data, target)
-                else:
-                    udp_server.sendto(self.add_udp_header(msg, addr), address)
-            except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
-                continue
+        threading.Thread(target=self.udp_run_forever, args=(address, port), daemon=True).start()
+        try:
+            while True:
+                self.send(b"heartbeat")
+                time.sleep(5)
+        except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
+            return
 
 
 class Socks5:
@@ -355,7 +357,7 @@ class Socks5:
     A socks5 server
     """
 
-    def __init__(self, ip: str = "0.0.0.0", port: int = 1080, session: BaseSessoin = DefaultSession):
+    def __init__(self, ip="0.0.0.0", port=1080, session=DefaultSession):
         self.session = session
         self.server = socket.socket(socket.AF_INET)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -367,11 +369,10 @@ class Socks5:
         self.server.close()
         logger.info("Socks5 Server closed")
 
-    def _link(self, sock: socket.socket, address: (str, int)):
+    def _link(self, sock, address):
         logger.info("Connection from %s:%s" % address)
         session = self.session(sock, address)
         session.start()
-        del session
 
     def master_worker(self):
         while True:
@@ -399,7 +400,7 @@ class Socks5:
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format='[%(asctime)s] [%(levelname)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
     )
