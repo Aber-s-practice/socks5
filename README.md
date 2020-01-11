@@ -12,7 +12,7 @@ python3 Socks5.py
 
 #### Self-customization
 
-Can read [DefaultSession](https://github.com/AberSheeran/Socks5/blob/master/Socks5.py#L223) in Socks5.py
+Can read [DefaultSession](https://github.com/abersheeran/socks5/blob/threading/Socks5.py#L217) in Socks5.py
 
 ## Reference link: 
 
