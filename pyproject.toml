@@ -1,9 +1,23 @@
 [tool.poetry]
-name = "Socks5"
+name = "asyncio-socks5"
 version = "0.1.0"
 description = "Socks5 Server/Client by asyncio."
 authors = ["abersheeran <me@abersheeran.com>"]
 license = "MIT"
+
+readme = "README.md"
+homepage = "https://github.com/abersheeran/socks5"
+repository = "https://github.com/abersheeran/socks5"
+documentation = "https://github.com/abersheeran/socks5"
+classifiers=[
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+
+packages = [
+    { include = "socks5" },
+]
 
 [tool.poetry.dependencies]
 python = "^3.6"
