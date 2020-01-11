@@ -263,7 +263,9 @@ class UDPSession(BaseSession):
             transport, protocol = await self.create_udp_server(3)
             await self.sock.send(create_replication(Status.SUCCEEDED))
         except OSError:
-            await self.sock.send(create_replication(Status.GENERAL_SOCKS_SERVER_FAILURE))
+            await self.sock.send(
+                create_replication(Status.GENERAL_SOCKS_SERVER_FAILURE)
+            )
 
         asyncio.get_event_loop().create_task(self.heartbeat())
 
@@ -318,6 +320,8 @@ class Socks5:
 
         except AuthenticationError as e:
             logger.warning(e)
+        except ValueError:  # unpack error
+            pass
         except (Socks5Error, ConnectionError):
             pass
 
