@@ -59,7 +59,7 @@ class TCPSocket(Socket):
 
 
 class BaseSession:
-    def __init__(self, sock: TCPSocket, host: str, port: int) -> None:
+    def __init__(self, sock: Socket, host: str, port: int) -> None:
         self.sock = sock
         self.host = host
         self.port = port
@@ -327,7 +327,7 @@ class Socks5:
 
         await socket.close()
 
-    async def shake_hand(self, sock: TCPSocket) -> Tuple[int, str, int]:
+    async def shake_hand(self, sock: Socket) -> Tuple[int, str, int]:
         data = await sock.recv(2)
         VER, NMETHODS = data
         if VER != 5:
