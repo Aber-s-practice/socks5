@@ -36,12 +36,14 @@ def onlyfirst(*coros, loop=None) -> Awaitable[Any]:
     finished, result, _future = 0, loop.create_future(), None
 
     def _done_callback(fut: Future) -> None:
+        nonlocal finished, result, _future
+
         try:
             fut.result()  # try raise exception
         except CancelledError:
             fut.cancel()
-
-        nonlocal finished, result, _future
+        except Exception as e:
+            result.set_exception(e)
 
         finished += 1
 
@@ -53,7 +55,7 @@ def onlyfirst(*coros, loop=None) -> Awaitable[Any]:
                 continue
             task.cancel()
 
-        if finished == len(tasks):
+        if finished == len(tasks) and not result.done():
             result.set_result(_future.result())
 
     for coro in coros:

@@ -1,4 +1,5 @@
 import signal
+import socket
 import asyncio
 import logging
 import traceback
@@ -96,9 +97,13 @@ class ConnectSession(BaseSession):
             logger.info(f"Connected {host}:{port}")
         except ConnectionRefusedError:
             await local.send(create_replication(Status.CONNECTION_REFUSED))
-            logger.info(f"Failing connect {host}:{port}")
-        except (ConnectionError, TimeoutError, asyncio.TimeoutError):
+            logger.info(f"ConnectionRefused {host}:{port}")
+        except (ConnectionError, TimeoutError, asyncio.TimeoutError, socket.timeout):
             await local.send(create_replication(Status.GENERAL_SOCKS_SERVER_FAILURE))
+            logger.info(f"Failing connect {host}:{port}")
+        except socket.gaierror:
+            await local.send(create_replication(Status.HOST_UNREACHABLE))
+            logger.info(f"Failing connect {host}:{port}")
         except Exception:
             await local.send(create_replication(Status.GENERAL_SOCKS_SERVER_FAILURE))
             logger.error("Unknown Error: ↓↓↓")
@@ -123,36 +128,26 @@ class UDPSession(BaseSession):
     UDP ASSOCIATE Session
     """
 
-    def generate_message(
+    def from_local(
         self, message: bytes, address: AddressType
     ) -> Tuple[bytes, AddressType]:
-        """
-        create message that send udp to remote
-
-        notice: `address` is the destination address to which the message is sent.
-        """
         return message, address
 
-    def parse_message(
+    def from_remote(
         self, message: bytes, address: AddressType
     ) -> Tuple[bytes, AddressType]:
-        """
-        parse message from remote
-
-        notice: `address` is the source address of the message.
-        """
         return message, address
 
-    class Protocol:
+    class UDPProtocol:
         def __init__(
             self,
             local_address: AddressType,
-            generate_message: Callable[[bytes, AddressType], Tuple[bytes, AddressType]],
-            parse_message: Callable[[bytes, AddressType], Tuple[bytes, AddressType]],
+            from_local: Callable[[bytes, AddressType], Tuple[bytes, AddressType]],
+            from_remote: Callable[[bytes, AddressType], Tuple[bytes, AddressType]],
         ) -> None:
             self.local_address = local_address
-            self.generate_message = generate_message
-            self.parse_message = parse_message
+            self.from_local = from_local
+            self.from_remote = from_remote
 
         def local_is_zero(self) -> bool:
             """
@@ -163,12 +158,21 @@ class UDPSession(BaseSession):
             return self.local_address in (("0.0.0.0", 0), ("::", 0))
 
         def connection_made(self, transport: asyncio.DatagramTransport) -> None:
+            """
+            udp open
+            """
             self.transport = transport
 
         def connection_lost(self, exc) -> None:
-            pass
+            """
+            udp closed
+            """
+            # nothing to do
 
         def parse_socks5_header(self, data) -> Tuple[bytes, AddressType]:
+            """
+            parse target address and message from socks5 udp
+            """
             _data = bytearray(data)
 
             def recv(num: int) -> bytes:
@@ -199,6 +203,9 @@ class UDPSession(BaseSession):
             return recv(-1), (DST_ADDR, DST_PORT)
 
         def add_socks5_header(self, data: bytes, address: AddressType) -> bytes:
+            """
+            add socks5 header to send udp
+            """
             RSV, FRAG = b"\x00\x00", b"\x00"
             ATYP = judge_atyp(address[0])
             if ATYP == Atyp.IPV4:
@@ -218,16 +225,16 @@ class UDPSession(BaseSession):
                 # parse socks5
                 try:
                     message, target = self.parse_socks5_header(data)
-                except AssertionError:
+                except (AssertionError, IndexError):
                     return
 
                 if self.local_is_zero():
                     self.local_address = address
 
-                self.transport.sendto(*self.generate_message(message, target))
+                self.transport.sendto(*self.from_local(message, target))
             else:
                 self.transport.sendto(
-                    self.add_socks5_header(*self.parse_message(message, address)),
+                    self.add_socks5_header(*self.from_remote(data, address)),
                     self.local_address,
                 )
 
@@ -240,7 +247,7 @@ class UDPSession(BaseSession):
             pass
 
     async def create_udp_server(
-        self, max_time: int = 3
+        self, *, max_time: int = 3
     ) -> Tuple[asyncio.DatagramTransport, Any]:
         host = self.sock.address[0]
 
@@ -248,10 +255,8 @@ class UDPSession(BaseSession):
             try:
                 port = randint(1025, 65535)
                 return await asyncio.get_event_loop().create_datagram_endpoint(
-                    lambda: self.Protocol(
-                        (self.host, self.port),
-                        self.generate_message,
-                        self.parse_message,
+                    lambda: self.UDPProtocol(
+                        (self.host, self.port), self.from_local, self.from_remote,
                     ),
                     (host, port),
                 )
@@ -260,7 +265,7 @@ class UDPSession(BaseSession):
 
     async def run(self) -> None:
         try:
-            transport, protocol = await self.create_udp_server(3)
+            transport, protocol = await self.create_udp_server(max_time=3)
             await self.sock.send(create_replication(Status.SUCCEEDED))
         except OSError:
             await self.sock.send(
