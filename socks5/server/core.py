@@ -301,10 +301,6 @@ class Socks5:
         self.bind_session_class = bind_session_class
         self.udp_session_class = udp_session_class
 
-    def close(self) -> None:
-        self.server.close()
-        logger.info(f"Socks5 Server has closed.")
-
     async def link(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -388,6 +384,7 @@ class Socks5:
 
         def termina(signo, frame):
             server.close()
+            logger.info(f"Socks5 Server has closed.")
 
         signal.signal(signal.SIGINT, termina)
         signal.signal(signal.SIGTERM, termina)
