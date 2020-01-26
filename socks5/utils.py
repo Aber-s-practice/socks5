@@ -43,7 +43,8 @@ def onlyfirst(*coros, loop=None) -> Awaitable[Any]:
         except CancelledError:
             fut.cancel()
         except Exception as e:
-            result.set_exception(e)
+            if not result.done():
+                result.set_exception(e)
 
         finished += 1
 

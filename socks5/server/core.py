@@ -54,8 +54,6 @@ class TCPSocket(Socket):
         return self.w.is_closing()
 
     async def close(self) -> None:
-        if self.closed:
-            return
         self.w.close()
 
 
@@ -307,9 +305,10 @@ class Socks5:
         """
         deal all link
         """
-        socket = TCPSocket(reader, writer)
-        logger.debug(f"Connection from {writer.get_extra_info('peername')}")
         try:
+            socket = TCPSocket(reader, writer)
+            logger.debug(f"Connection from {writer.get_extra_info('peername')}")
+
             command, host, port = await self.shake_hand(socket)
 
             if command == Command.CONNECT:
@@ -325,8 +324,8 @@ class Socks5:
             pass
         except (Socks5Error, ConnectionError):
             pass
-
-        await socket.close()
+        finally:
+            await socket.close()
 
     async def shake_hand(self, sock: Socket) -> Tuple[int, str, int]:
         data = await sock.recv(2)
