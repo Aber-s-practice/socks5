@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Set, Awaitable
+from typing import Set
 from socket import AF_INET, AF_INET6, inet_pton
 from asyncio import Future, Task
 
