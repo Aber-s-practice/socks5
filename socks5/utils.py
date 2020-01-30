@@ -1,9 +1,8 @@
 import asyncio
-from typing import Set
 from socket import AF_INET, AF_INET6, inet_pton
-from asyncio import Future, Task
 
 from .values import Atyp
+from .types import Socket, AddressType
 
 
 def judge_atyp(host: str) -> int:
@@ -25,49 +24,35 @@ def judge_atyp(host: str) -> int:
     return Atyp.DOMAIN
 
 
-def onlyfirst(*coros, loop=None) -> Future:
+class TCPSocket(Socket):
     """
-    Execute multiple coroutines concurrently, returning only the results of the first execution.
-
-    When one is completed, the execution of other coroutines will be canceled.
+    wrapper asyncio.StreamReader, asyncio.StreamWriter
     """
-    loop = loop or asyncio.get_running_loop()
-    tasks: Set[Task] = set()
-    finished, result, _future = 0, loop.create_future(), None
 
-    def _done_callback(fut: Future) -> None:
-        nonlocal finished, result, _future
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        self.r = reader
+        self.w = writer
+        self.__address = writer.get_extra_info("peername")
 
-        if result.cancelled():
-            return  # nothing to do on cancelled
+    @property
+    def address(self) -> AddressType:
+        return self.__address
 
-        try:
-            fut.result()  # try raise exception
-        except Exception:
-            pass
+    async def recv(self, num: int) -> bytes:
+        data = await self.r.read(num)
+        return data
 
-        finished += 1
+    async def send(self, data: bytes) -> int:
+        self.w.write(data)
+        await self.w.drain()
+        return len(data)
 
-        if _future is None:
-            _future = fut
+    @property
+    def closed(self) -> bool:
+        return self.w.is_closing()
 
-        map(lambda task: task.cancel(), filter(lambda task: not task.done(), tasks))
-
-        if finished == len(tasks):
-            try:
-                result.set_result(_future.result())
-            except Exception:
-                result.set_exception(_future.exception())
-
-    for coro in coros:
-        task = loop.create_task(coro)
-        task.add_done_callback(_done_callback)
-        tasks.add(task)
-
-    result.add_done_callback(
-        lambda fut: map(
-            lambda task: task.cancel(), filter(lambda task: not task.done(), tasks)
-        )
-    )
-
-    return result
+    async def close(self) -> None:
+        if self.w.is_closing():
+            return
+        self.w.close()
+        await self.w.wait_closed()
