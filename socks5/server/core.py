@@ -56,10 +56,14 @@ class TCPSocket(Socket):
         return self.w.is_closing()
 
     async def close(self) -> None:
-        if self.w.is_closing():
-            return
-        self.w.close()
-        await self.w.wait_closed()
+        # some time, call await self.w.drain() will raise ConnectResetError.
+        # so, close two time.
+        for _ in range(2):
+            try:
+                self.w.close()
+                await self.w.wait_closed()
+            except ConnectionError:
+                pass  # tcp socket has closed
         logger.debug(f"Closed {self.address}")
 
 
@@ -242,14 +246,6 @@ class UDPSession(BaseSession):
                 self.transport.sendto(msg, self.local_address)
                 logger.debug(f"{self.local_address} >U< {msg}")
 
-    async def heartbeat(self) -> None:
-        try:
-            while not self.sock.closed:
-                await asyncio.sleep(5)
-                await self.sock.send(b"heartbeat")
-        except ConnectionResetError:
-            pass
-
     async def create_udp_server(
         self, *, max_time: int = 3
     ) -> Tuple[asyncio.DatagramTransport, Any]:
@@ -277,8 +273,14 @@ class UDPSession(BaseSession):
             )
             return
 
-        await self.heartbeat()
-        transport.close()
+        try:
+            while not self.sock.closed:
+                await asyncio.sleep(5)
+                await self.sock.send(b"heartbeat")
+        except ConnectionResetError:
+            pass
+        finally:
+            transport.close()
 
 
 class Socks5:
