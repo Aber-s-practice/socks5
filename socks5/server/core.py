@@ -53,7 +53,7 @@ class TCPSocket(Socket):
 
     @property
     def closed(self) -> bool:
-        return self.r.at_eof()
+        return self.w.is_closing()
 
     async def close(self) -> None:
         if self.w.is_closing():
