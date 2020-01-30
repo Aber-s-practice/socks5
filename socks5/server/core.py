@@ -42,22 +42,25 @@ class TCPSocket(Socket):
 
     async def recv(self, num: int) -> bytes:
         data = await self.r.read(num)
+        logger.debug(f"{self.address} <T< {data}")
         return data
 
     async def send(self, data: bytes) -> int:
         self.w.write(data)
         await self.w.drain()
+        logger.debug(f"{self.address} >T> {data}")
         return len(data)
 
     @property
     def closed(self) -> bool:
-        return self.w.is_closing()
+        return self.r.at_eof()
 
     async def close(self) -> None:
         if self.w.is_closing():
             return
         self.w.close()
         await self.w.wait_closed()
+        logger.debug(f"Closed {self.address}")
 
 
 class BaseSession:
@@ -95,27 +98,26 @@ class ConnectSession(BaseSession):
         try:
             logger.debug(f"Connecting {host}:{port}")
             remote = await self.connect_remote(host, port)
-            logger.info(f"Connected {host}:{port}")
+            logger.debug(f"Connected {host}:{port}")
         except ConnectionRefusedError:
             await local.send(create_replication(Status.CONNECTION_REFUSED))
-            logger.info(f"ConnectionRefused {host}:{port}")
+            logger.debug(f"ConnectionRefused {host}:{port}")
         except (ConnectionError, TimeoutError, asyncio.TimeoutError, socket.timeout):
             await local.send(create_replication(Status.GENERAL_SOCKS_SERVER_FAILURE))
-            logger.info(f"Failing connect {host}:{port}")
+            logger.debug(f"Failing connect {host}:{port}")
         except socket.gaierror:
             await local.send(create_replication(Status.HOST_UNREACHABLE))
-            logger.info(f"Failing connect {host}:{port}")
+            logger.debug(f"Failing connect {host}:{port}")
         except Exception:
             await local.send(create_replication(Status.GENERAL_SOCKS_SERVER_FAILURE))
             logger.error("Unknown Error: ↓↓↓")
             traceback.print_exc()
         else:
-            await local.send(create_replication(Status.SUCCEEDED))
             try:
+                await local.send(create_replication(Status.SUCCEEDED))
                 await onlyfirst(self.bridge(remote, local), self.bridge(local, remote))
             finally:
                 await remote.close()
-                await local.close()
 
 
 class BindSession(BaseSession):
@@ -232,18 +234,18 @@ class UDPSession(BaseSession):
                 if self.local_is_zero():
                     self.local_address = address
 
-                self.transport.sendto(*self.from_local(message, target))
+                msg, addr = self.from_local(message, target)
+                self.transport.sendto(msg, addr)
+                logger.debug(f"{address} >U< {msg}")
             else:
-                self.transport.sendto(
-                    self.add_socks5_header(*self.from_remote(data, address)),
-                    self.local_address,
-                )
+                msg = self.add_socks5_header(*self.from_remote(data, address))
+                self.transport.sendto(msg, self.local_address)
+                logger.debug(f"{self.local_address} >U< {msg}")
 
     async def heartbeat(self) -> None:
         try:
-            while True:
+            while not self.sock.closed:
                 await asyncio.sleep(5)
-                await self.sock.send(b"heartbeat")
         except ConnectionResetError:
             pass
 
@@ -272,12 +274,9 @@ class UDPSession(BaseSession):
             await self.sock.send(
                 create_replication(Status.GENERAL_SOCKS_SERVER_FAILURE)
             )
+            return
 
-        asyncio.get_event_loop().create_task(self.heartbeat())
-
-        while not self.sock.closed:
-            await asyncio.sleep(1)
-
+        await self.heartbeat()
         transport.close()
 
 
@@ -323,8 +322,6 @@ class Socks5:
 
         except AuthenticationError as e:
             logger.warning(e)
-        except ValueError:  # unpack error
-            pass
         except (Socks5Error, ConnectionError):
             pass
         finally:
