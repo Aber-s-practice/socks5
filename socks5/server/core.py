@@ -236,7 +236,7 @@ class UDPSession(BaseSession):
 
                 msg, addr = self.from_local(message, target)
                 self.transport.sendto(msg, addr)
-                logger.debug(f"{address} >U< {msg}")
+                logger.debug(f"{addr} >U< {msg}")
             else:
                 msg = self.add_socks5_header(*self.from_remote(data, address))
                 self.transport.sendto(msg, self.local_address)
@@ -246,6 +246,7 @@ class UDPSession(BaseSession):
         try:
             while not self.sock.closed:
                 await asyncio.sleep(5)
+                await self.sock.send(b"heartbeat")
         except ConnectionResetError:
             pass
 
