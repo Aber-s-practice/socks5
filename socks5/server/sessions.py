@@ -41,7 +41,6 @@ class ConnectSession(BaseSession):
         while True:
             data = await sender.recv(8192)
             if not data:
-                await sender.close()
                 return
             await receiver.send(data)
 
