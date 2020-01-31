@@ -125,6 +125,7 @@ class Socks5:
         run server forever
         """
         server = await self.start()
+        logger.info(f"Using {asyncio.get_event_loop().__class__.__name__}")
         logger.info(f"Socks5 Server serving on {server.sockets[0].getsockname()}")
 
         def termina(signo, frame):

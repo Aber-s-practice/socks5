@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "asyncio-socks5"
-version = "0.2.0"
+version = "0.2.1"
 description = "Socks5 Server/Client by asyncio."
 authors = ["abersheeran <me@abersheeran.com>"]
 license = "MIT"

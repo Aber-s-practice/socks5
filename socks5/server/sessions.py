@@ -8,7 +8,7 @@ from socket import AF_INET, AF_INET6, inet_ntop, inet_pton
 
 from socks5.types import Socket, AddressType
 from socks5.values import Status, Atyp
-from socks5.utils import judge_atyp, TCPSocket
+from socks5.utils import judge_atyp, onlyfirst, TCPSocket
 
 from ._socks5 import create_replication
 
@@ -68,9 +68,7 @@ class ConnectSession(BaseSession):
         else:
             try:
                 await local.send(create_replication(Status.SUCCEEDED))
-                await asyncio.gather(
-                    self.bridge(remote, local), self.bridge(local, remote)
-                )
+                await onlyfirst(self.bridge(remote, local), self.bridge(local, remote))
             finally:
                 await remote.close()
 
