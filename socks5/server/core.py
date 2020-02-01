@@ -2,7 +2,7 @@ import signal
 import asyncio
 import logging
 from socket import AF_INET, AF_INET6, inet_ntop
-from typing import Tuple
+from typing import NoReturn, Tuple
 
 from socks5.values import Status, Command, Atyp
 from socks5.types import Socket
@@ -40,28 +40,27 @@ class Socks5:
         self.host = host
         self.port = port
 
+        self.server: asyncio.AbstractServer = None
+
         self.authentication_class = authentication_class
         self.connect_session_class = connect_session_class
         self.bind_session_class = bind_session_class
         self.udp_session_class = udp_session_class
 
-    async def link(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
+    async def link(self, sock: TCPSocket) -> None:
         """
         deal all link
         """
         try:
-            socket = TCPSocket(reader, writer)
-            logger.debug(f"Connection from {writer.get_extra_info('peername')}")
-            command, host, port = await self.shake_hand(socket)
+            logger.debug(f"Connection from {sock.w.get_extra_info('peername')}")
+            command, host, port = await self.shake_hand(sock)
 
             if command == Command.CONNECT:
-                await self.connect_session_class(socket, host, port).run()
+                await self.connect_session_class(sock, host, port).run()
             elif command == Command.UDP_ASSOCIATE:
-                await self.udp_session_class(socket, host, port).run()
+                await self.udp_session_class(sock, host, port).run()
             elif command == Command.BIND:
-                await self.bind_session_class(socket, host, port).run()
+                await self.bind_session_class(sock, host, port).run()
 
         except AuthenticationError as e:
             logger.warning(e)
@@ -69,7 +68,7 @@ class Socks5:
             # ValueError: raise by unpack
             pass  # nothing to do
         finally:
-            await socket.close()
+            await sock.close()
 
     async def shake_hand(self, sock: Socket) -> Tuple[int, str, int]:
         data = await sock.recv(2)
@@ -115,26 +114,43 @@ class Socks5:
             raise NoCommandAllowed(f"Unsupported CMD value: {CMD}")
         return CMD, DST_ADDR, DST_PORT
 
-    async def start(self) -> asyncio.AbstractServer:
-        return await asyncio.start_server(self.link, self.host, self.port)
+    async def start_server(self) -> None:
+        async def link(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            return await self.link(TCPSocket(reader, writer))
 
-    async def run_forever(self) -> None:
+        self.server = await asyncio.start_server(link, self.host, self.port)
+        await self.server.start_serving()
+        logger.info(f"Using {asyncio.get_event_loop().__class__.__name__}")
+        logger.info(f"Socks5 Server serving on {self.server.sockets[0].getsockname()}")
+
+    async def stop_server(self) -> None:
+        if self.server is None:
+            logger.info("Server is not running.")
+            return
+        self.server.close()
+        await self.server.wait_closed()
+        logger.info("Socks5 Server has closed.")
+
+    async def run_forever(self) -> NoReturn:
         """
         run server forever
         """
-        server = await self.start()
-        logger.info(f"Using {asyncio.get_event_loop().__class__.__name__}")
-        logger.info(f"Socks5 Server serving on {server.sockets[0].getsockname()}")
+        should_exit = False
 
         def termina(signo, frame):
-            server.close()
-            logger.info(f"Socks5 Server has closed.")
+            nonlocal should_exit
+            should_exit = True
 
         signal.signal(signal.SIGINT, termina)
         signal.signal(signal.SIGTERM, termina)
 
-        while server.is_serving():
-            await asyncio.sleep(1)
+        await self.start_server()
+        while not should_exit:
+            await asyncio.sleep(0.25)
+        await self.stop_server()
 
     def run(self) -> None:
-        asyncio.get_event_loop().run_until_complete(self.run_forever())
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.run_forever())

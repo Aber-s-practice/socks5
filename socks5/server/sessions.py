@@ -93,14 +93,6 @@ class UDPProtocol:
         self.from_local = from_local
         self.from_remote = from_remote
 
-    def local_is_zero(self) -> bool:
-        """
-        return self.local_address in (
-            ("0.0.0.0", 0), ("::", 0)
-        )
-        """
-        return self.local_address in (("0.0.0.0", 0), ("::", 0))
-
     def connection_made(self, transport: asyncio.DatagramTransport) -> None:
         """
         udp open
@@ -112,6 +104,33 @@ class UDPProtocol:
         udp closed
         """
         # nothing to do
+
+    def datagram_received(self, data: bytes, address: AddressType) -> None:
+        if self.local_is_zero() or address == self.local_address:
+            # parse socks5
+            try:
+                message, target = self.parse_socks5_header(data)
+            except (AssertionError, IndexError):
+                return
+
+            if self.local_is_zero():
+                self.local_address = address
+
+            msg, addr = self.from_local(message, target)
+            self.transport.sendto(msg, addr)
+            logger.debug(f"{addr} >U< {msg}")
+        else:
+            msg = self.add_socks5_header(*self.from_remote(data, address))
+            self.transport.sendto(msg, self.local_address)
+            logger.debug(f"{self.local_address} >U< {msg}")
+
+    def local_is_zero(self) -> bool:
+        """
+        return self.local_address in (
+            ("0.0.0.0", 0), ("::", 0)
+        )
+        """
+        return self.local_address in (("0.0.0.0", 0), ("::", 0))
 
     def parse_socks5_header(self, data) -> Tuple[bytes, AddressType]:
         """
@@ -162,25 +181,6 @@ class UDPProtocol:
         DST_PORT = address[1].to_bytes(2, "big")
         return RSV + FRAG + ATYP + DST_ADDR + DST_PORT + data
 
-    def datagram_received(self, data: bytes, address: AddressType) -> None:
-        if self.local_is_zero() or address == self.local_address:
-            # parse socks5
-            try:
-                message, target = self.parse_socks5_header(data)
-            except (AssertionError, IndexError):
-                return
-
-            if self.local_is_zero():
-                self.local_address = address
-
-            msg, addr = self.from_local(message, target)
-            self.transport.sendto(msg, addr)
-            logger.debug(f"{addr} >U< {msg}")
-        else:
-            msg = self.add_socks5_header(*self.from_remote(data, address))
-            self.transport.sendto(msg, self.local_address)
-            logger.debug(f"{self.local_address} >U< {msg}")
-
 
 class UDPSession(BaseSession):
     """
@@ -218,6 +218,7 @@ class UDPSession(BaseSession):
     async def run(self) -> None:
         try:
             transport, protocol = await self.create_udp_server(max_time=3)
+            logger.debug(f"UDP Bind {transport.get_extra_info('sockname')}")
             await self.sock.send(create_replication(Status.SUCCEEDED))
         except OSError:
             await self.sock.send(
@@ -233,3 +234,4 @@ class UDPSession(BaseSession):
             pass  # RFC1928: tcp close, should close udp server
         finally:
             transport.close()
+            logger.debug(f"UDP Closed {transport.get_extra_info('sockname')}")

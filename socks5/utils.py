@@ -1,5 +1,6 @@
 import asyncio
 import warnings
+import logging
 from asyncio import Task, Future
 from socket import AF_INET, AF_INET6, inet_pton
 from typing import Set
@@ -76,29 +77,49 @@ class TCPSocket(Socket):
     wrapper asyncio.StreamReader, asyncio.StreamWriter
     """
 
+    state_log = logging.getLogger("Socket.state")
+    message_log = logging.getLogger("Socket.message")
+
     def __init__(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         self.r = reader
         self.w = writer
         self.__address = writer.get_extra_info("peername")
+        self.state_log.debug(f"Opened {self}")
 
     def __del__(self) -> None:
         if not self.closed:
-            sentence = f"{self.w.get_extra_info('sockname')}=={self.w.get_extra_info('peername')} not closed."
-            warnings.warn(sentence)
+            warnings.warn(f"{self} not closed.")
+
+    def __repr__(self) -> str:
+        return (
+            "["
+            + str(self.w.get_extra_info("sockname"))
+            + ", "
+            + str(self.w.get_extra_info("peername"))
+            + "]"
+        )
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     @property
     def address(self) -> AddressType:
+        """
+        return remote address.
+        """
         return self.__address
 
     async def recv(self, num: int) -> bytes:
         data = await self.r.read(num)
+        self.message_log.debug(f"<<< {data}")
         return data
 
     async def send(self, data: bytes) -> int:
         self.w.write(data)
         await self.w.drain()
+        self.message_log.debug(f">>> {data}")
         return len(data)
 
     @property
@@ -107,4 +128,9 @@ class TCPSocket(Socket):
 
     async def close(self) -> None:
         self.w.close()
-        await self.w.wait_closed()
+        self.state_log.debug(f"Closed {self}")
+
+        try:
+            await self.w.wait_closed()
+        except ConnectionError:
+            pass  # in closing, sending the remaining data may cause a network error
