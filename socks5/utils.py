@@ -85,9 +85,8 @@ class TCPSocket(Socket):
 
     def __del__(self) -> None:
         if not self.closed:
-            warnings.warn(
-                f"{self.w.get_extra_info('sockname')}=={self.w.get_extra_info('peername')} not closed."
-            )
+            sentence = f"{self.w.get_extra_info('sockname')}=={self.w.get_extra_info('peername')} not closed."
+            warnings.warn(sentence)
 
     @property
     def address(self) -> AddressType:

@@ -55,21 +55,19 @@ class Socks5:
             socket = TCPSocket(reader, writer)
             logger.debug(f"Connection from {writer.get_extra_info('peername')}")
             command, host, port = await self.shake_hand(socket)
-        except AuthenticationError as e:
-            logger.warning(e)
-            await socket.close()
-            return
-        except (Socks5Error, ConnectionError):
-            await socket.close()
-            return
 
-        try:
             if command == Command.CONNECT:
                 await self.connect_session_class(socket, host, port).run()
             elif command == Command.UDP_ASSOCIATE:
                 await self.udp_session_class(socket, host, port).run()
             elif command == Command.BIND:
                 await self.bind_session_class(socket, host, port).run()
+
+        except AuthenticationError as e:
+            logger.warning(e)
+        except (Socks5Error, ConnectionError, ValueError):
+            # ValueError: raise by unpack
+            pass  # nothing to do
         finally:
             await socket.close()
 
