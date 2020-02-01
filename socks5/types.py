@@ -15,9 +15,6 @@ class Socket(metaclass=ABCMeta):
 
     @abstractmethod
     async def close(self) -> None:
-        """
-        This method is idempotent.
-        """
         raise NotImplementedError()
 
     @property
