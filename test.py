@@ -40,7 +40,7 @@ try:
 except socket.error:
     traceback.print_exc()
 
-time.sleep(9)
+time.sleep(11)
 
 process.terminate()
 process.wait()

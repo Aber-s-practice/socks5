@@ -38,11 +38,14 @@ class ConnectSession(BaseSession):
         return TCPSocket(r, w)
 
     async def bridge(self, sender: Socket, receiver: Socket) -> None:
-        while True:
-            data = await sender.recv(8192)
-            if not data:
-                return
-            await receiver.send(data)
+        try:
+            while True:
+                data = await sender.recv(8192)
+                if not data:
+                    raise ConnectionResetError()
+                await receiver.send(data)
+        except OSError:
+            return
 
     async def run(self) -> None:
         local, host, port = self.sock, self.host, self.port
