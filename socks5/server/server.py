@@ -2,7 +2,7 @@ import signal
 import asyncio
 import logging
 from socket import AF_INET, AF_INET6, inet_ntop
-from typing import NoReturn, Tuple
+from typing import Type, NoReturn, Tuple
 
 from socks5.values import Status, Command, Atyp
 from socks5.types import Socket
@@ -32,10 +32,10 @@ class Socks5:
         host: str = "0.0.0.0",
         port: int = 1080,
         *,
-        authentication_class: BaseAuthentication = NoAuthentication,
-        connect_session_class: ConnectSession = ConnectSession,
-        bind_session_class: BindSession = BindSession,
-        udp_session_class: UDPSession = UDPSession,
+        authentication_class: Type[BaseAuthentication] = NoAuthentication,
+        connect_session_class: Type[ConnectSession] = ConnectSession,
+        bind_session_class: Type[BindSession] = BindSession,
+        udp_session_class: Type[UDPSession] = UDPSession,
     ):
         self.host = host
         self.port = port

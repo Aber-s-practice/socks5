@@ -1,7 +1,7 @@
 import sys
 import logging
 
-from .core import Socks5
+from . import Socks5
 
 
 logging.basicConfig(

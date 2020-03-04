@@ -57,11 +57,11 @@ class ConnectSession(BaseSession):
         except ConnectionRefusedError:
             await local.send(create_replication(Status.CONNECTION_REFUSED))
             logger.debug(f"ConnectionRefused {host}:{port}")
-        except (ConnectionError, TimeoutError, asyncio.TimeoutError, socket.timeout):
-            await local.send(create_replication(Status.GENERAL_SOCKS_SERVER_FAILURE))
-            logger.debug(f"Failing connect {host}:{port}")
         except socket.gaierror:
             await local.send(create_replication(Status.HOST_UNREACHABLE))
+            logger.debug(f"Failing connect {host}:{port}")
+        except (OSError, asyncio.TimeoutError):
+            await local.send(create_replication(Status.GENERAL_SOCKS_SERVER_FAILURE))
             logger.debug(f"Failing connect {host}:{port}")
         except Exception:
             await local.send(create_replication(Status.GENERAL_SOCKS_SERVER_FAILURE))
@@ -135,7 +135,7 @@ class UDPProtocol:
         """
         return self.local_address in (("0.0.0.0", 0), ("::", 0))
 
-    def parse_socks5_header(self, data) -> Tuple[bytes, AddressType]:
+    def parse_socks5_header(self, data: bytes) -> Tuple[bytes, AddressType]:
         """
         parse target address and message from socks5 udp
         """
