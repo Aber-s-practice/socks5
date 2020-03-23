@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "asyncio-socks5"
-version = "0.2.7"
+version = "0.2.8"
 description = "Socks5 Server/Client by asyncio."
 authors = ["abersheeran <me@abersheeran.com>"]
 license = "MIT"
@@ -20,7 +20,7 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.6"
+python = "^3.7"
 
 [tool.poetry.dev-dependencies]
 black = {version = "^19.10b0", allow-prereleases = true}
