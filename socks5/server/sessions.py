@@ -179,7 +179,7 @@ class UDPProtocol:
         elif ATYP == Atyp.IPV6:
             DST_ADDR = inet_pton(AF_INET6, address[0])
         elif ATYP == Atyp.DOMAIN:
-            DST_ADDR = len(address[0]).to_bytes(2, "big") + address[0].encode("UTF-8")
+            DST_ADDR = len(address[0]).to_bytes(1, "big") + address[0].encode("UTF-8")
         ATYP = ATYP.to_bytes(1, "big")
         DST_PORT = address[1].to_bytes(2, "big")
         return RSV + FRAG + ATYP + DST_ADDR + DST_PORT + data
