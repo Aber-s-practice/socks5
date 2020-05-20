@@ -21,7 +21,10 @@ class BaseSession:
         self.host = host
         self.port = port
 
-    async def run(self) -> None:
+    def __await__(self) -> None:
+        return self.__call__().__await__()
+
+    async def __call__(self) -> None:
         await self.sock.send(create_replication(Status.COMMAND_NOT_SUPPORTED))
 
 
@@ -47,7 +50,7 @@ class ConnectSession(BaseSession):
         except OSError:
             return
 
-    async def run(self) -> None:
+    async def __call__(self) -> None:
         local, host, port = self.sock, self.host, self.port
 
         try:
@@ -218,7 +221,7 @@ class UDPSession(BaseSession):
                 pass
         raise OSError("Can't bind a port to create udp server.")
 
-    async def run(self) -> None:
+    async def __call__(self) -> None:
         try:
             transport, protocol = await self.create_udp_server(max_time=3)
             logger.debug(f"UDP Bind {transport.get_extra_info('sockname')}")

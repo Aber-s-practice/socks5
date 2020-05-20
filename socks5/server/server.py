@@ -42,10 +42,10 @@ class Socks5:
 
         self.server: asyncio.AbstractServer = None
 
-        self.authentication_class = authentication_class
-        self.connect_session_class = connect_session_class
-        self.bind_session_class = bind_session_class
-        self.udp_session_class = udp_session_class
+        self.authentication = authentication_class
+        self.connect_session = connect_session_class
+        self.bind_session = bind_session_class
+        self.udp_session = udp_session_class
 
     async def link(self, sock: TCPSocket) -> None:
         """
@@ -56,11 +56,11 @@ class Socks5:
             command, host, port = await self.shake_hand(sock)
 
             if command == Command.CONNECT:
-                await self.connect_session_class(sock, host, port).run()
+                await self.connect_session(sock, host, port)
             elif command == Command.UDP_ASSOCIATE:
-                await self.udp_session_class(sock, host, port).run()
+                await self.udp_session(sock, host, port)
             elif command == Command.BIND:
-                await self.bind_session_class(sock, host, port).run()
+                await self.bind_session(sock, host, port)
 
         except AuthenticationError as e:
             logger.warning(e)
@@ -78,7 +78,7 @@ class Socks5:
             raise NoVersionAllowed("Unsupported version!")
 
         # authenticate
-        authentication = self.authentication_class(sock)
+        authentication = self.authentication(sock)
         METHODS = set(await sock.recv(NMETHODS))
         METHOD = authentication.get_method(METHODS)
         await sock.send(b"\x05" + METHOD.to_bytes(1, "big"))
@@ -122,7 +122,9 @@ class Socks5:
 
         self.server = await asyncio.start_server(link, self.host, self.port)
         await self.server.start_serving()
-        logger.info(f"Using {asyncio.get_event_loop().__class__.__name__}")
+        logger.info(
+            f"Using selector: {asyncio.get_event_loop()._selector.__class__.__name__}"
+        )
         logger.info(f"Socks5 Server serving on {self.server.sockets[0].getsockname()}")
 
     async def stop_server(self) -> None:
