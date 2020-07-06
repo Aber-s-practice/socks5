@@ -122,9 +122,7 @@ class Socks5:
 
         self.server = await asyncio.start_server(link, self.host, self.port)
         await self.server.start_serving()
-        logger.info(
-            f"Using selector: {asyncio.get_event_loop()._selector.__class__.__name__}"
-        )
+        logger.info(f"Using loop: {asyncio.get_event_loop().__class__.__name__}")
         logger.info(f"Socks5 Server serving on {self.server.sockets[0].getsockname()}")
 
     async def stop_server(self) -> None:
